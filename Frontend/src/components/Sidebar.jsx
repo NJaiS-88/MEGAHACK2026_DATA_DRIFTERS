@@ -1,5 +1,5 @@
-import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { Sparkles, LayoutDashboard, Database, BarChart2, Settings, LogOut } from 'lucide-react';
 
 function Sidebar({ user, onLogout }) {
   const navigate = useNavigate();
@@ -39,9 +39,13 @@ function Sidebar({ user, onLogout }) {
               fontSize: '1rem',
               fontWeight: '500',
               cursor: 'pointer',
-              transition: 'background-color 0.2s'
+              transition: 'background-color 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
             }}
           >
+            <LayoutDashboard size={20} />
             Dashboard
           </button>
           <button 
@@ -56,9 +60,13 @@ function Sidebar({ user, onLogout }) {
               fontSize: '1rem',
               fontWeight: '500',
               cursor: 'pointer',
-              transition: 'background-color 0.2s'
+              transition: 'background-color 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
             }}
           >
+            <Database size={20} />
             Create Book
           </button>
           <button 
@@ -73,10 +81,61 @@ function Sidebar({ user, onLogout }) {
               fontSize: '1rem',
               fontWeight: '500',
               cursor: 'pointer',
-              transition: 'background-color 0.2s'
+              transition: 'background-color 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
             }}
           >
+            <BarChart2 size={20} />
             Progress
+          </button>
+
+          <div style={{ margin: '1rem 0', borderTop: '1px solid #1e293b' }}></div>
+
+          <button 
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('tutor-activate', { 
+                detail: { concept: 'General Guidance', explanation: 'Help me master my concepts!' } 
+              }));
+            }}
+            style={{
+              textAlign: 'left',
+              padding: '0.85rem 1rem',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+              color: '#38bdf8',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+              marginTop: '0.5rem'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.border = '1px solid rgba(56, 189, 248, 0.6)';
+              e.currentTarget.style.boxShadow = '0 6px 16px rgba(56, 189, 248, 0.15)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.border = '1px solid rgba(56, 189, 248, 0.3)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+            }}
+          >
+            <div style={{ 
+              backgroundColor: 'rgba(56, 189, 248, 0.15)', 
+              borderRadius: '8px', 
+              padding: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Sparkles size={20} />
+            </div>
+            AI Tutor
           </button>
         </nav>
       </div>
@@ -94,8 +153,12 @@ function Sidebar({ user, onLogout }) {
           color: '#9ca3af',
           border: 'none',
           fontSize: '1rem',
-          cursor: 'pointer'
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
         }}>
+          <Settings size={20} />
           Settings
         </button>
         
@@ -113,9 +176,13 @@ function Sidebar({ user, onLogout }) {
             border: 'none',
             fontSize: '1rem',
             fontWeight: '500',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
           }}
         >
+          <LogOut size={20} />
           Logout
         </button>
       </div>

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { mlApi } from '../services/mlApi';
 import Leaderboard from '../components/Leaderboard';
-import PlantProgress from '../components/PlantProgress';
 
 const ProgressPage = ({ user }) => {
   const [stats, setStats] = useState({
@@ -16,11 +15,8 @@ const ProgressPage = ({ user }) => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const resp = await fetch(`http://127.0.0.1:8000/api/student-stats/${user.id}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          setStats(data);
-        }
+        const data = await mlApi.get(`/student-stats/${user.id}`);
+        setStats(data);
       } catch (err) {
         console.error("Failed to fetch stats", err);
       } finally {

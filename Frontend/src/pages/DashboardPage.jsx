@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { mlApi } from '../services/mlApi';
 import toast from 'react-hot-toast';
 import PlantProgress from '../components/PlantProgress';
 
@@ -20,11 +21,8 @@ function DashboardPage({ user }) {
 
         // Fetch knowledge states from ML backend
         if (user?.id) {
-          const mlResp = await fetch(`http://127.0.0.1:8000/api/student-knowledge/${user.id}`);
-          if (mlResp.ok) {
-            const mlData = await mlResp.json();
-            setKnowledge(mlData.conceptStates || {});
-          }
+          const mlData = await mlApi.get(`/student-knowledge/${user.id}`);
+          setKnowledge(mlData.conceptStates || {});
         }
       } catch (err) {
         toast.error('Failed to load dashboard data');

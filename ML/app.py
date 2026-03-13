@@ -24,6 +24,8 @@ from ML.Feature8.src.gemini_recommendation_engine import recommend_learning_reso
 from ML.feature3_student_knowledge_tracking.services.knowledge_service import process_student_answer
 from ML.feature3_student_knowledge_tracking.database import student_knowledge_collection, student_attempts_collection, db
 from ML.feature3_student_knowledge_tracking.config import settings
+from ML.FeatureNotes.src.note_service import note_service
+from typing import Dict, Any
 
 # Diagnostic: Verify database configuration on server load
 print(f"\n[Server] Starting ML Service with MONGODB_URI: " + 
@@ -58,10 +60,14 @@ class UnifiedSubmitRequest(BaseModel):
     concept: str
     selectedAnswer: str
     selectedOptionNumber: Optional[int] = None  # Option number (1-indexed)
-    questionText: Optional[int] = None  # Full question text
+    questionText: Optional[str] = None  # Full question text
     options: Optional[List[str]] = None  # All available options
     correctAnswer: Optional[str] = None  # Correct answer text
     explanation: str
+
+class NoteRequest(BaseModel):
+    userId: str
+    hierarchy: Dict[str, Any]
 
 @app.get("/api/health")
 async def health():
@@ -210,6 +216,24 @@ async def get_leaderboard(timeframe: str = "lifetime"):
         return {"members": members}
     except Exception as exc:
         return {"error": f"Failed to generate leaderboard: {exc}"}
+
+@app.post("/api/notes/generate")
+async def generate_notes_api(request: NoteRequest):
+    try:
+        # Fetch knowledge states for the user
+        knowledge = student_knowledge_collection.find_one({"userId": request.userId})
+        concept_states = knowledge.get("conceptStates", {}) if knowledge else {}
+        
+        notes = await note_service.get_notes_for_book(
+            user_id=request.userId,
+            hierarchy=request.hierarchy,
+            concept_states=concept_states
+        )
+        return {"notes": notes}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Failed to generate notes: {exc}"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { mlApi } from '../services/mlApi';
 
 const Leaderboard = () => {
   const [filter, setFilter] = useState('daily');
@@ -9,11 +10,8 @@ const Leaderboard = () => {
     const fetchLeaderboard = async () => {
       setLoading(true);
       try {
-        const resp = await fetch(`http://127.0.0.1:8000/api/leaderboard?timeframe=${filter}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          setMembers(data.members || []);
-        }
+        const data = await mlApi.get(`/leaderboard?timeframe=${filter}`);
+        setMembers(data.members || []);
       } catch (err) {
         console.error("Leaderboard fetch failed", err);
       } finally {

@@ -83,9 +83,6 @@ function App() {
                 <AiTutorPanel 
                   isOpen={tutorOpen} 
                   onClose={() => setTutorOpen(false)} 
-                  misunderstoodConcept={tutorContext.concept}
-                  originalExplanation={tutorContext.explanation}
-                  userId={user.id}
                 />
               </div>
             ) : (

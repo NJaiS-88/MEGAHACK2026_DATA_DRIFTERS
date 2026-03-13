@@ -1,11 +1,6 @@
-import React, { useState } from 'react';
-import { parseLLMResponse } from '../utils/parseLLMResponse';
+import React, { useState, useEffect } from 'react';
 import QuestionCard from './QuestionCard.jsx';
-
-/**
- * QuizPanel
- * Side panel for practicing questions on a specific concept.
- */
+import { mlApi } from '../services/mlApi';
 function QuizPanel({ concept, onClose }) {
   const [attempts, setAttempts] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -18,11 +13,8 @@ function QuizPanel({ concept, onClose }) {
     if (!user.id) return;
 
     try {
-      const resp = await fetch(`http://127.0.0.1:8000/api/student-attempts/${user.id}/${concept}`);
-      if (resp.ok) {
-        const data = await resp.json();
-        setAttempts(data.attempts || []);
-      }
+      const data = await mlApi.get(`/student-attempts/${user.id}/${concept}`);
+      setAttempts(data.attempts || []);
     } catch (err) {
       console.error("Failed to fetch attempts", err);
     }
@@ -38,14 +30,7 @@ function QuizPanel({ concept, onClose }) {
     setQuestions([]);
 
     try {
-      const resp = await fetch('http://127.0.0.1:8000/api/generate-questions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ concept })
-      });
-      
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
+      const data = await mlApi.post('/generate-questions', { concept });
       setQuestions(data.questions || []);
     } catch (err) {
       setError("AI Generation Error: " + err.message);
