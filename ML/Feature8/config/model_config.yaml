@@ -1,0 +1,10 @@
+paths:
+  data_dir: "data"
+  datasets_dir: "datasets"
+  models_dir: "models/recommendation_model"
+  faiss_index: "models/recommendation_model/faiss.index"
+  resource_df: "models/recommendation_model/resources.pkl"
+
+model:
+  sentence_transformer: "sentence-transformers/all-MiniLM-L6-v2"
+  top_k: 5

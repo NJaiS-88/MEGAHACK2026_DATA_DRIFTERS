@@ -1,0 +1,133 @@
+.sidebar-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 100vh;
+  background-color: #0d1117;
+}
+
+.app {
+  padding: 3rem;
+  overflow-y: auto;
+}
+
+header {
+  text-align: left;
+  margin-bottom: 1.5rem;
+}
+
+header h1 {
+  font-size: 2rem;
+  margin-bottom: 0.25rem;
+}
+
+header p {
+  margin: 0;
+  color: #9ca3af;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 2.2fr);
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+.panel {
+  background-color: #020617;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.9);
+  text-align: left;
+}
+
+.panel-graph {
+  /* Contain the canvas and prevent it from bleeding outside rounded corners */
+  overflow: hidden;
+}
+
+.graph-toolbar {
+  display: inline-flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.graph-mode-btn {
+  border-radius: 9999px;
+  border: 1px solid #1e293b;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.8rem;
+  background-color: #020617;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.graph-mode-btn--active {
+  background-color: #38bdf8;
+  color: #020617;
+  border-color: #38bdf8;
+}
+
+.panel h2 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+}
+
+.form textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  font-family: inherit;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  background-color: #020617;
+  color: #f9fafb;
+}
+
+.form textarea:focus {
+  outline: 2px solid #38bdf8;
+  outline-offset: 1px;
+  border-color: #38bdf8;
+}
+
+.form button {
+  margin-top: 0.75rem;
+  background-color: #38bdf8;
+  color: #020617;
+  border-radius: 9999px;
+  padding: 0.6rem 1.4rem;
+}
+
+.form button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.error {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background-color: #450a0a;
+  color: #fecaca;
+  border: 1px solid #b91c1c;
+  text-align: left;
+}
+
+.result {
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 900px) {
+  .app {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+

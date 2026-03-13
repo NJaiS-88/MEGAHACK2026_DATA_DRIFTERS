@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+datasets
+transformers
+torch
+pyyaml
+sentence-transformers
+scikit-learn
+pandas
+python-multipart
