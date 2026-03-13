@@ -4,9 +4,14 @@ import ConceptGraph from '../components/ConceptGraph.jsx';
 import QuizPanel from '../components/QuizPanel.jsx';
 import { api } from '../services/api';
 import toast from 'react-hot-toast';
+import { mlApi } from '../services/mlApi';
+import NotesPanel from '../components/NotesPanel.jsx';
 
-const API_BASE = 'http://127.0.0.1:8000';
-
+/**
+ * CreateBookPage
+ * Allows users to generate a study map from text or file.
+ * If an 'id' param exists, it loads that specific book map.
+ */
 function CreateBookPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -16,6 +21,10 @@ function CreateBookPage() {
   const [error, setError] = useState(null);
   const [selectedConcept, setSelectedConcept] = useState(null);
   const [isViewing, setIsViewing] = useState(false);
+  const [file, setFile] = useState(null);
+  const [viewMode, setViewMode] = useState('map'); // 'map' or 'notes'
+
+  const [knowledgeStates, setKnowledgeStates] = useState({});
 
   // Effect to load book if viewing
   useEffect(() => {
@@ -41,7 +50,24 @@ function CreateBookPage() {
     }
   }, [id]);
 
-  const [file, setFile] = useState(null);
+  // Fetch knowledge states
+  const fetchKnowledgeStates = async () => {
+    const userString = localStorage.getItem('thinkmap_user');
+    if (!userString) return;
+    const user = JSON.parse(userString);
+    if (!user.id) return;
+
+    try {
+      const data = await mlApi.get(`/student-knowledge/${user.id}`);
+      setKnowledgeStates(data.conceptStates || {});
+    } catch (err) {
+      console.error('Failed to fetch knowledge states:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchKnowledgeStates();
+  }, []);
 
   const handleFileUpload = async (e) => {
     e.preventDefault();
@@ -58,7 +84,7 @@ function CreateBookPage() {
     formData.append('file', file);
 
     try {
-      const res = await fetch(`${API_BASE}/api/topic-hierarchy-file`, {
+      const res = await fetch(`http://127.0.0.1:8005/api/topic-hierarchy-file`, {
         method: 'POST',
         body: formData,
       });
@@ -81,8 +107,10 @@ function CreateBookPage() {
           sourceText: `Generated from file: ${file.name}`
         };
         
-        await api.post('/books', newBookData);
+        const savedBook = await api.post('/books', newBookData);
         toast.success('Study Map generated from file!');
+        // Switch to viewing the newly created book
+        if (savedBook?._id) navigate(`/book/${savedBook._id}`);
       }
     } catch (err) {
       setError(err.message || 'Error processing file');
@@ -106,41 +134,26 @@ function CreateBookPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/topic-hierarchy`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
-      }
-
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
-        const hierarchy = data.hierarchy;
-        setResult(hierarchy);
-        
-        // Save automatically to MongoDB
-        const mainTopic = Object.keys(hierarchy)[0] || 'Untitled Study Book';
-        const newBookData = {
-          title: mainTopic,
-          date: new Date().toLocaleDateString(),
-          hierarchy: hierarchy,
-          sourceText: text
-        };
-        
-        try {
-          await api.post('/books', newBookData);
-          toast.success('Book saved to your cloud library!');
-        } catch (err) {
-          console.error('Failed to save to cloud:', err);
-          toast.error('Failed to sync to cloud, but view is ready.');
-        }
+      const data = await mlApi.post('/topic-hierarchy', { text });
+      
+      const hierarchy = data.hierarchy;
+      setResult(hierarchy);
+      
+      const mainTopic = Object.keys(hierarchy)[0] || 'Untitled Study Book';
+      const newBookData = {
+        title: mainTopic,
+        date: new Date().toLocaleDateString(),
+        hierarchy: hierarchy,
+        sourceText: text
+      };
+      
+      try {
+        const savedBook = await api.post('/books', newBookData);
+        toast.success('Book saved to your cloud library!');
+        if (savedBook?._id) navigate(`/book/${savedBook._id}`);
+      } catch (err) {
+        console.error('Failed to save to cloud:', err);
+        toast.error('Failed to sync to cloud, but view is ready.');
       }
     } catch (err) {
       setError(err.message || 'Unexpected error');
@@ -148,28 +161,6 @@ function CreateBookPage() {
       setLoading(false);
     }
   };
-
-  const [knowledgeStates, setKnowledgeStates] = useState({});
-
-  // Fetch knowledge states
-  const fetchKnowledgeStates = async () => {
-    const user = JSON.parse(localStorage.getItem('thinkmap_user') || '{}');
-    if (!user.id) return;
-
-    try {
-      const res = await fetch(`http://127.0.0.1:8000/api/student-knowledge/${user.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setKnowledgeStates(data.conceptStates || {});
-      }
-    } catch (err) {
-      console.error('Failed to fetch knowledge states:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchKnowledgeStates();
-  }, []);
 
   const handleConceptSelect = (node) => {
     if (node.group === 'concept' || node.group === 'subtopic') {
@@ -179,7 +170,7 @@ function CreateBookPage() {
 
   const handleQuizClose = () => {
     setSelectedConcept(null);
-    fetchKnowledgeStates(); // Refresh states after quiz
+    fetchKnowledgeStates();
   };
 
   return (
@@ -188,8 +179,49 @@ function CreateBookPage() {
         <div style={{ marginBottom: '0.5rem', color: '#38bdf8', fontWeight: 'bold', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           AI Content Lab
         </div>
-        <h1>{isViewing ? result && Object.keys(result)[0] : 'Generate Study Book'}</h1>
-        <p>{isViewing ? 'Mastery Map view' : 'Transform any educational content into a structured learning map.'}</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h1>{isViewing ? result && Object.keys(result)[0] : 'Generate Study Book'}</h1>
+            <p>{isViewing ? (viewMode === 'map' ? 'Mastery Map view' : 'AI Study Notes') : 'Transform any educational content into a structured learning map.'}</p>
+          </div>
+          
+          {isViewing && (
+            <div style={{ display: 'flex', gap: '0.5rem', backgroundColor: '#0f172a', padding: '0.4rem', borderRadius: '12px', border: '1px solid #1e293b' }}>
+              <button 
+                onClick={() => setViewMode('map')}
+                style={{
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: viewMode === 'map' ? '#38bdf8' : 'transparent',
+                  color: viewMode === 'map' ? '#000' : '#9ca3af',
+                  fontSize: '0.85rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                🗺️ Mastery Map
+              </button>
+              <button 
+                onClick={() => setViewMode('notes')}
+                style={{
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: viewMode === 'notes' ? '#38bdf8' : 'transparent',
+                  color: viewMode === 'notes' ? '#000' : '#9ca3af',
+                  fontSize: '0.85rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                📝 View Notes
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       <main className="layout" style={{ display: 'grid', gridTemplateColumns: (result && !isViewing) ? '0.8fr 2.2fr' : '1fr', gap: '2rem' }}>
@@ -254,16 +286,27 @@ function CreateBookPage() {
         )}
 
         {result && (
-          <section className="panel panel-graph">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h2 style={{ margin: 0 }}>Mastery Map</h2>
-              <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: 0 }}>Click on nodes to practice</p>
-            </div>
-            <ConceptGraph 
-              data={result} 
-              onSelectNode={handleConceptSelect} 
-              knowledgeStates={knowledgeStates}
-            />
+          <section className="panel" style={{ padding: '0', overflow: 'hidden', border: '1px solid #1e293b', background: 'transparent' }}>
+            {viewMode === 'map' ? (
+              <div style={{ padding: '2rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                  <h2 style={{ margin: 0 }}>Mastery Map</h2>
+                  <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: 0 }}>Click on nodes to practice</p>
+                </div>
+                <ConceptGraph 
+                  data={result} 
+                  onSelectNode={handleConceptSelect} 
+                  knowledgeStates={knowledgeStates}
+                />
+              </div>
+            ) : (
+              <div style={{ padding: '2rem' }}>
+                <NotesPanel 
+                  userId={JSON.parse(localStorage.getItem('thinkmap_user') || '{}').id}
+                  hierarchy={result}
+                />
+              </div>
+            )}
           </section>
         )}
       </main>

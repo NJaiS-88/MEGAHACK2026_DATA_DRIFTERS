@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { mlApi } from '../services/mlApi';
 import toast from 'react-hot-toast';
 import PlantProgress from '../components/PlantProgress';
 
@@ -20,11 +21,8 @@ function DashboardPage({ user }) {
 
         // Fetch knowledge states from ML backend
         if (user?.id) {
-          const mlResp = await fetch(`http://127.0.0.1:8000/api/student-knowledge/${user.id}`);
-          if (mlResp.ok) {
-            const mlData = await mlResp.json();
-            setKnowledge(mlData.conceptStates || {});
-          }
+          const mlData = await mlApi.get(`/student-knowledge/${user.id}`);
+          setKnowledge(mlData.conceptStates || {});
         }
       } catch (err) {
         toast.error('Failed to load dashboard data');
@@ -77,25 +75,6 @@ function DashboardPage({ user }) {
             total={totalConcepts} 
             label="Overall Learning" 
           />
-          
-          {/* Motivation card */}
-          <div style={{
-            minWidth: '240px',
-            padding: '1.5rem',
-            backgroundColor: '#0f172a',
-            borderRadius: '16px',
-            border: '1px dashed #38bdf840',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>✨</div>
-            <p style={{ fontSize: '0.9rem', color: '#9ca3af', margin: 0 }}>
-              Keep solving quizzes to watch your knowledge garden grow!
-            </p>
-          </div>
         </div>
       </section>
 

@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 from pydantic import BaseModel
+from datetime import datetime, time, timedelta
 
 # Ensure the project root is in sys.path for absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,8 +22,10 @@ from ML.Feature7.src.inference import detect_misconception
 # Use new Gemini-based recommendation engine
 from ML.Feature8.src.gemini_recommendation_engine import recommend_learning_resources
 from ML.feature3_student_knowledge_tracking.services.knowledge_service import process_student_answer
-from ML.feature3_student_knowledge_tracking.database import student_knowledge_collection, student_attempts_collection
+from ML.feature3_student_knowledge_tracking.database import student_knowledge_collection, student_attempts_collection, db
 from ML.feature3_student_knowledge_tracking.config import settings
+from ML.FeatureNotes.src.note_service import note_service
+from typing import Dict, Any
 
 # Diagnostic: Verify database configuration on server load
 print(f"\n[Server] Starting ML Service with MONGODB_URI: " + 
@@ -62,19 +65,18 @@ class UnifiedSubmitRequest(BaseModel):
     correctAnswer: Optional[str] = None  # Correct answer text
     explanation: str
 
+class NoteRequest(BaseModel):
+    userId: str
+    hierarchy: Dict[str, Any]
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "ThinkMap Unified ML API"}
 
-
 @app.post("/api/topic-hierarchy")
 async def topic_hierarchy(text: str = Body(..., embed=True)):
-    """
-    Accept raw text and return the topic hierarchy.
-    """
     if not isinstance(text, str) or not text.strip():
         return {"error": "Provide 'text' in the request."}
-
     try:
         hierarchy = generate_topic_hierarchy(text)
         return {"hierarchy": hierarchy}
@@ -83,48 +85,32 @@ async def topic_hierarchy(text: str = Body(..., embed=True)):
 
 @app.post("/api/topic-hierarchy-file")
 async def topic_hierarchy_file(file: UploadFile = File(...)):
-    """
-    Accept PDF, Image, or Docx and return the topic hierarchy.
-    """
     try:
         suffix = os.path.splitext(file.filename)[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
-
         try:
             hierarchy = generate_topic_hierarchy(tmp_path)
-            # Re-read text if needed for sourceText storage? 
-            # The pipeline extracts it internally. For now return hierarchy.
             return {"hierarchy": hierarchy, "filename": file.filename}
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-                
     except Exception as exc:
-        print(f"[API] Error processing file {file.filename}: {exc}")
         return {"error": f"File processing failed: {str(exc)}"}
 
 @app.post("/api/generate-questions")
 async def generate_questions_api(concept: str = Body(..., embed=True)):
-    """
-    Generate 3 AI questions for a concept.
-    """
-    print(f"\n[API] Received request: POST /api/generate-questions | Concept: {concept}")
     try:
         svc = QuestionService()
         questions = svc.ai_generate_questions(concept)
         return {"questions": questions}
     except Exception as exc:
-        print(f"[API] ERROR during generation: {exc}")
         return {"error": f"AI generation failed: {str(exc)}"}
 
 @app.get("/api/student-knowledge/{userId}")
 async def get_student_knowledge(userId: str):
-    """
-    Fetch all concept states for a specific user.
-    """
     try:
         doc = student_knowledge_collection.find_one({"userId": userId})
         if not doc:
@@ -135,16 +121,10 @@ async def get_student_knowledge(userId: str):
 
 @app.get("/api/student-attempts/{userId}/{concept:path}")
 async def get_student_attempts(userId: str, concept: str):
-    """
-    Fetch all attempts for a specific user and concept.
-    """
     try:
-        cursor = student_attempts_collection.find(
-            {"userId": userId, "concept": concept}
-        ).sort("timestamp", -1)
+        cursor = student_attempts_collection.find({"userId": userId, "concept": concept}).sort("timestamp", -1)
         attempts = []
         for doc in cursor:
-            # Convert ObjectId and datetime if necessary for JSON serialization
             doc["_id"] = str(doc["_id"])
             if "timestamp" in doc:
                 doc["timestamp"] = doc["timestamp"].isoformat()
@@ -153,73 +133,108 @@ async def get_student_attempts(userId: str, concept: str):
     except Exception as exc:
         return {"error": f"Failed to fetch attempts: {exc}"}
 
-@app.post("/api/submit-answer")
-async def submit_answer_integrated(request: UnifiedSubmitRequest):
+from ML.feature3_student_knowledge_tracking.services.tutor_service import get_tutor_response
+
+class TutorChatRequest(BaseModel):
+    userId: str
+    misunderstood_concept: str
+    student_explanation: str
+    history: List[dict] # [{role: "user", content: "..."}, {role: "assistant", content: "..."}]
+
+@app.post("/api/tutor/chat")
+async def tutor_chat(request: TutorChatRequest):
     """
-    Unified endpoint integrating all 4 features:
-    1. Knowledge Tracking (Feature 3 Student Knowledge Tracking)
-    2. Question Generation (Feature 3)
-    3. Misconception Detection (Feature 7)
-    4. Learning Recommendations (Feature 8)
-    
-    Stores all data in MongoDB including:
-    - Question attempts with option numbers
-    - Misconceptions
-    - Recommendations
-    - Knowledge states
+    Handle chat interaction with AI tutor.
     """
-    print(f"\n[API] Received request: POST /api/submit-answer | User: {request.userId} | Concept: {request.concept}")
+    print(f"\n[API] Received tutor chat: User: {request.userId} | Concept: {request.misunderstood_concept}")
     
     try:
-        # 1. Misconception Detection (Feature 7) - Run first to use in recommendations
-        misconception_result = detect_misconception(
-            request.explanation,
-            selected_answer=request.selectedAnswer,
-            correct_answer=request.correctAnswer
+        tutor_result = await get_tutor_response(
+            misunderstood_concept=request.misunderstood_concept,
+            student_explanation=request.student_explanation,
+            history=request.history
         )
-        print(f"[API] Feature7 - Misconception detected: {misconception_result.get('misconception_detected', False)}")
-        
-        # 2. Learning Recommendations (Feature 8) - Use misconception result with context
+        return tutor_result
+    except Exception as exc:
+        print(f"[API] ERROR during tutor chat: {exc}")
+        return {"error": f"Tutor chat failed: {str(exc)}"}
+
+@app.post("/api/submit-answer")
+async def submit_answer_integrated(request: UnifiedSubmitRequest):
+    try:
+        misconception_result = detect_misconception(request.explanation, selected_answer=request.selectedAnswer, correct_answer=request.correctAnswer)
         understanding_level = "misconception" if misconception_result.get("misconception_detected", False) else "basic"
-        recommendations = recommend_learning_resources(
-            concept=request.concept,
-            misconception=misconception_result.get("misconception", "No Misconception"),
-            understanding_level=understanding_level,
-            question_text=request.questionText,
-            student_answer=request.selectedAnswer
-        )
-        print(f"[API] Feature8 - Generated {len(recommendations.get('recommendations', []))} personalized recommendations")
-        
-        # 3. Process via Knowledge Service (Feature 3 Student Knowledge Tracking)
-        # This handles DB storage and knowledge state updates
-        knowledge_result = await process_student_answer(
-            user_id=request.userId,
-            question_id=str(request.questionId),
-            concept=request.concept,
-            selected_answer=request.selectedAnswer,
-            selected_option_number=request.selectedOptionNumber,
-            question_text=request.questionText,
-            options=request.options or [],
-            correct_answer=request.correctAnswer,
-            explanation=request.explanation,
-            misconception_result=misconception_result,
-            recommendations=recommendations.get("recommendations", [])
-        )
-        print(f"[API] Feature3 - Knowledge state: {knowledge_result.get('state', 'unknown')}")
-        
-        # 4. Return integrated response for frontend
-        return {
-            "status": "success",
-            "conceptId": knowledge_result.get("conceptId", request.concept),
-            "state": knowledge_result.get("state", "yellow"),
-            "feedback": knowledge_result.get("feedback", "Thank you for your submission."),
-            "misconception": misconception_result,
-            "recommendations": recommendations.get("recommendations", [])
-        }
-        
+        recommendations = recommend_learning_resources(concept=request.concept, misconception=misconception_result.get("misconception", "No Misconception"), understanding_level=understanding_level, question_text=request.questionText, student_answer=request.selectedAnswer)
+        knowledge_result = await process_student_answer(user_id=request.userId, question_id=str(request.questionId), concept=request.concept, selected_answer=request.selectedAnswer, selected_option_number=request.selectedOptionNumber, question_text=request.questionText, options=request.options or [], correct_answer=request.correctAnswer, explanation=request.explanation, misconception_result=misconception_result, recommendations=recommendations.get("recommendations", []))
+        return {"status": "success", "conceptId": knowledge_result.get("conceptId", request.concept), "state": knowledge_result.get("state", "yellow"), "feedback": knowledge_result.get("feedback", "Thank you for your submission."), "misconception": misconception_result, "recommendations": recommendations.get("recommendations", [])}
     except Exception as exc:
         import traceback
-        print(f"[API] ERROR during integrated submission: {exc}")
         traceback.print_exc()
         return {"error": f"Integrated analysis failed: {str(exc)}"}
 
+@app.get("/api/student-stats/{userId}")
+async def get_student_stats(userId: str):
+    try:
+        now = datetime.utcnow()
+        start_of_day = datetime.combine(now.date(), time.min)
+        knowledge = student_knowledge_collection.find_one({"userId": userId})
+        concept_states = knowledge.get("conceptStates", {}) if knowledge else {}
+        mastered_count = sum(1 for s in concept_states.values() if s == "green")
+        daily_solved = student_attempts_collection.count_documents({"userId": userId, "timestamp": {"$gte": start_of_day}})
+        recent_attempts = student_attempts_collection.find({"userId": userId, "misconception.misconception_detected": True}).sort("timestamp", -1).limit(5)
+        misconceptions = list(set([a.get("misconception", {}).get("misconception") for a in recent_attempts if a.get("misconception", {}).get("misconception")]))
+        return {"points": knowledge.get("points", 0) if knowledge else 0, "streak": knowledge.get("streak", 0) if knowledge else 0, "dailySolved": daily_solved, "totalSolved": knowledge.get("totalQuestionsSolved", 0) if knowledge else 0, "masteredCount": mastered_count, "misconceptions": misconceptions}
+    except Exception as exc:
+        return {"error": f"Failed to fetch stats: {exc}"}
+
+@app.get("/api/leaderboard")
+async def get_leaderboard(timeframe: str = "lifetime"):
+    try:
+        users_coll = db["users"]
+        user_cursor = users_coll.find({}, {"email": 1, "name": 1})
+        user_map = {str(u["_id"]): u.get("name") or u.get("email", "Unknown").split("@")[0] for u in user_cursor}
+        if timeframe == "lifetime":
+            cursor = student_knowledge_collection.find().sort("points", -1).limit(20)
+            members = []
+            for doc in cursor:
+                uid = doc["userId"]
+                states = doc.get("conceptStates", {})
+                mastered = sum(1 for s in states.values() if s == "green")
+                members.append({"userId": uid, "name": user_map.get(uid, "Guest"), "points": doc.get("points", 0), "solved": mastered, "progress": round((mastered / max(len(states), 1)) * 100) if states else 0, "streak": doc.get("streak", 0)})
+            return {"members": members}
+        delta = {"daily": timedelta(days=1), "weekly": timedelta(days=7), "monthly": timedelta(days=30)}.get(timeframe, timedelta(days=1))
+        start_time = datetime.utcnow() - delta
+        pipeline = [{"$match": {"timestamp": {"$gte": start_time}}}, {"$group": {"_id": "$userId", "totalPoints": {"$sum": "$points"}, "questionsSolved": {"$sum": 1}}}, {"$sort": {"totalPoints": -1}}, {"$limit": 20}]
+        results = list(student_attempts_collection.aggregate(pipeline))
+        members = []
+        for res in results:
+            uid = res["_id"]
+            k_doc = student_knowledge_collection.find_one({"userId": uid})
+            states = k_doc.get("conceptStates", {}) if k_doc else {}
+            mastered = sum(1 for s in states.values() if s == "green")
+            members.append({"userId": uid, "name": user_map.get(uid, "Guest"), "points": res["totalPoints"], "solved": mastered, "progress": round((mastered / max(len(states), 1)) * 100) if states else 0})
+        return {"members": members}
+    except Exception as exc:
+        return {"error": f"Failed to generate leaderboard: {exc}"}
+
+@app.post("/api/notes/generate")
+async def generate_notes_api(request: NoteRequest):
+    try:
+        # Fetch knowledge states for the user
+        knowledge = student_knowledge_collection.find_one({"userId": request.userId})
+        concept_states = knowledge.get("conceptStates", {}) if knowledge else {}
+        
+        notes = await note_service.get_notes_for_book(
+            user_id=request.userId,
+            hierarchy=request.hierarchy,
+            concept_states=concept_states
+        )
+        return {"notes": notes}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Failed to generate notes: {exc}"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

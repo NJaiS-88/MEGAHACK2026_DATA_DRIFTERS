@@ -4,6 +4,7 @@ import { parseLLMResponse } from '../utils/parseLLMResponse';
 import AnswerFeedback from './AnswerFeedback.jsx';
 import { api } from '../services/api';
 import toast from 'react-hot-toast';
+import { mlApi } from '../services/mlApi';
 
 /**
  * QuestionCard
@@ -31,41 +32,17 @@ function QuestionCard({ concept, questionData, index, onSuccess }) {
     const selectedOptionNumber = questionData.options.findIndex(opt => opt === selectedOption) + 1;
 
     try {
-      // Check if server is reachable first
-      const healthCheck = await fetch('http://127.0.0.1:8000/api/health', {
-        method: 'GET',
-        signal: AbortSignal.timeout(3000) // 3 second timeout
-      }).catch(() => null);
-      
-      if (!healthCheck || !healthCheck.ok) {
-        throw new Error('ML server is not running. Please start the server on port 8000.');
-      }
-
-      const resp = await fetch('http://127.0.0.1:8000/api/submit-answer', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: user.id || 'anonymous',
-          questionId: questionData.id || `${concept}_${index}`.replace(/\s+/g, '_'),
-          concept: concept,
-          selectedAnswer: selectedOption,
-          selectedOptionNumber: selectedOptionNumber,
-          questionText: questionData.question,
-          options: questionData.options || [],
-          correctAnswer: questionData.answer,
-          explanation: reasoning
-        }),
-        signal: AbortSignal.timeout(30000) // 30 second timeout for the actual request
+      const data = await mlApi.post('/submit-answer', {
+        userId: user.id || 'anonymous',
+        questionId: questionData.id || `${concept}_${index}`.replace(/\s+/g, '_'),
+        concept: concept,
+        selectedAnswer: selectedOption,
+        selectedOptionNumber: selectedOptionNumber,
+        questionText: questionData.question,
+        options: questionData.options || [],
+        correctAnswer: questionData.answer,
+        explanation: reasoning
       });
-
-      if (!resp.ok) {
-        const errorText = await resp.text().catch(() => 'Unknown error');
-        throw new Error(`API error (${resp.status}): ${errorText}`);
-      }
-
-      const data = await resp.json();
       
       if (data.error) {
         throw new Error(data.error);
@@ -84,6 +61,16 @@ function QuestionCard({ concept, questionData, index, onSuccess }) {
       };
 
       setResult(evaluation);
+
+      // Trigger AI Tutor if misconception detected
+      if (evaluation.misconception && evaluation.misconception.misconception_detected) {
+        window.dispatchEvent(new CustomEvent('tutor-activate', { 
+          detail: { 
+            concept: concept, 
+            explanation: reasoning 
+          } 
+        }));
+      }
 
       // Trigger refresh in parent
       if (onSuccess) onSuccess();
