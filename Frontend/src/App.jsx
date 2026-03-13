@@ -10,11 +10,26 @@ import CreateBookPage from './pages/CreateBookPage.jsx'
 import ProgressPage from './pages/ProgressPage.jsx'
 import LandingPage from './pages/LandingPage.jsx'
 
+import AiTutorPanel from './components/AiTutorPanel.jsx'
+
 function App() {
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('thinkmap_user')
     return savedUser ? JSON.parse(savedUser) : null
   })
+
+  // Tutor state
+  const [tutorOpen, setTutorOpen] = useState(false)
+  const [tutorContext, setTutorContext] = useState({ concept: '', explanation: '' })
+
+  useEffect(() => {
+    const handleTutorActivate = (e) => {
+      setTutorContext(e.detail)
+      setTutorOpen(true)
+    }
+    window.addEventListener('tutor-activate', handleTutorActivate)
+    return () => window.removeEventListener('tutor-activate', handleTutorActivate)
+  }, [])
 
   const handleLogin = (userData) => {
     setUser(userData)
@@ -64,6 +79,14 @@ function App() {
                     <Route path="*" element={<Navigate to="/dashboard" />} />
                   </Routes>
                 </div>
+
+                <AiTutorPanel 
+                  isOpen={tutorOpen} 
+                  onClose={() => setTutorOpen(false)} 
+                  misunderstoodConcept={tutorContext.concept}
+                  originalExplanation={tutorContext.explanation}
+                  userId={user.id}
+                />
               </div>
             ) : (
               <Navigate to="/login" />
