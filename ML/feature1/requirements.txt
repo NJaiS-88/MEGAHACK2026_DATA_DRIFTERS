@@ -1,0 +1,16 @@
+google-genai
+pytesseract
+easyocr
+python-docx
+spacy
+nltk
+pydantic
+pydantic-settings
+numpy
+pandas
+Pillow
+pytest
+streamlit
+fastapi
+uvicorn[standard]
+

@@ -1,0 +1,41 @@
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+    lowercase: true
+  },
+  password: {
+    type: String,
+    required: true
+  }
+}, { timestamps: true });
+
+// Hash password before saving - Compatible with Mongoose v9.3.0
+userSchema.pre('save', async function() {
+  const user = this;
+  if (!user.isModified('password')) {
+    return;
+  }
+
+  try {
+    console.log('Hashing password for:', user.email);
+    const hash = await bcrypt.hash(user.password, 10);
+    user.password = hash;
+    console.log('Password hashed successfully');
+  } catch (err) {
+    console.error('Bcrypt error:', err);
+    throw err;
+  }
+});
+
+// Compare password method
+userSchema.methods.comparePassword = function(candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+module.exports = mongoose.model('User', userSchema);

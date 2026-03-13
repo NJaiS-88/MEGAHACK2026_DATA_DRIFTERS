@@ -1,0 +1,14 @@
+{
+  "name": "thinkmap-monorepo",
+  "version": "1.0.0",
+  "scripts": {
+    "install:all": "npm install --prefix Backend && npm install --prefix Frontend && pip install -r ML/requirements.txt",
+    "dev:backend": "npm start --prefix Backend",
+    "dev:frontend": "npm run dev --prefix Frontend",
+    "dev:ml": "uvicorn ML.app:app --reload --port 8000",
+    "start": "npx concurrently \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:ml\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

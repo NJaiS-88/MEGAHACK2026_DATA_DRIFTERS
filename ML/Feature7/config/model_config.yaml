@@ -1,0 +1,9 @@
+model:
+  name: "sentence-transformers/all-MiniLM-L6-v2"
+  max_length: 128
+  batch_size: 16
+  epochs: 3
+  learning_rate: 2e-5
+  output_dir: "models/misconception_detector"
+dataset:
+  name: "scitail"

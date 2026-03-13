@@ -1,0 +1,7 @@
+datasets
+transformers
+torch
+pyyaml
+sentence-transformers
+scikit-learn
+pandas
