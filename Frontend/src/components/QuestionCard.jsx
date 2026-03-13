@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { model } from '../services/geminiClient';
 import { parseLLMResponse } from '../utils/parseLLMResponse';
 import AnswerFeedback from './AnswerFeedback.jsx';
+import StruggleIntervention from './StruggleIntervention.jsx';
 import { api } from '../services/api';
 import toast from 'react-hot-toast';
 import { mlApi } from '../services/mlApi';
@@ -15,6 +16,49 @@ function QuestionCard({ concept, questionData, index, onSuccess }) {
   const [reasoning, setReasoning] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  
+  // Struggle tracking state
+  const [attempts, setAttempts] = useState(0);
+  const [startTime] = useState(Date.now());
+  const [showIntervention, setShowIntervention] = useState(false);
+  const [timeSpent, setTimeSpent] = useState(0);
+
+  // Track time spent periodically
+  useEffect(() => {
+    if (result) return;
+    
+    const interval = setInterval(() => {
+      const currentSpent = Math.floor((Date.now() - startTime) / 1000);
+      setTimeSpent(currentSpent);
+      
+      // Every 30 seconds after 60s, check for struggle if not already shown
+      if (currentSpent > 60 && currentSpent % 30 === 0 && !showIntervention) {
+        checkStruggle(currentSpent, attempts);
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [startTime, attempts, result, showIntervention]);
+
+  const checkStruggle = async (currentSpent, currentAttempts) => {
+    const user = JSON.parse(localStorage.getItem('thinkmap_user') || '{}');
+    try {
+      const data = await mlApi.post('/track-attempt', {
+        userId: user.id || 'anonymous',
+        questionId: questionData.id || `${concept}_${index}`.replace(/\s+/g, '_'),
+        concept: concept,
+        timeSpent: currentSpent,
+        attempts: currentAttempts,
+        reasoningScore: 1.0 // Default
+      });
+      
+      if (data.intervention) {
+        setShowIntervention(true);
+      }
+    } catch (err) {
+      console.error("Struggle tracking failed", err);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!selectedOption) return;
@@ -25,6 +69,13 @@ function QuestionCard({ concept, questionData, index, onSuccess }) {
 
     setLoading(true);
     setResult(null);
+    setAttempts(prev => {
+        const newAttempts = prev + 1;
+        // Check struggle on every submission
+        const currentSpent = Math.floor((Date.now() - startTime) / 1000);
+        checkStruggle(currentSpent, newAttempts);
+        return newAttempts;
+    });
 
     const user = JSON.parse(localStorage.getItem('thinkmap_user') || '{}');
 
@@ -61,6 +112,9 @@ function QuestionCard({ concept, questionData, index, onSuccess }) {
       };
 
       setResult(evaluation);
+      if (evaluation.result === 'correct') {
+          setShowIntervention(false);
+      }
 
       // Trigger AI Tutor if misconception detected
       if (evaluation.misconception && evaluation.misconception.misconception_detected) {
@@ -106,17 +160,23 @@ function QuestionCard({ concept, questionData, index, onSuccess }) {
       border: '1px solid #1e293b',
       textAlign: 'left'
     }}>
-      <div style={{ marginBottom: '1rem' }}>
-        <span style={{ 
-          fontSize: '0.75rem', 
-          textTransform: 'uppercase', 
-          letterSpacing: '0.05em', 
-          color: '#38bdf8',
-          fontWeight: 'bold'
-        }}>
-          Question {index + 1} — {questionData.type}
-        </span>
-        <h3 style={{ margin: '0.5rem 0 0 0', fontSize: '1.1rem', color: '#f9fafb' }}>{questionData.question}</h3>
+      <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+            <span style={{ 
+            fontSize: '0.75rem', 
+            textTransform: 'uppercase', 
+            letterSpacing: '0.05em', 
+            color: '#38bdf8',
+            fontWeight: 'bold'
+            }}>
+            Question {index + 1} — {questionData.type}
+            </span>
+            <h3 style={{ margin: '0.5rem 0 0 0', fontSize: '1.1rem', color: '#f9fafb' }}>{questionData.question}</h3>
+        </div>
+        <div style={{ fontSize: '0.75rem', color: '#64748b', textAlign: 'right' }}>
+            <div>Time: {timeSpent}s</div>
+            <div>Attempts: {attempts}</div>
+        </div>
       </div>
 
       <div className="answer-input" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -187,6 +247,15 @@ function QuestionCard({ concept, questionData, index, onSuccess }) {
       >
         {loading ? 'Evaluating...' : result ? 'Submitted' : 'Submit Answer'}
       </button>
+
+      {showIntervention && !result && (
+        <StruggleIntervention 
+            isOpen={showIntervention}
+            concept={concept}
+            questionText={questionData.question}
+            onSkip={() => setShowIntervention(false)}
+        />
+      )}
 
       {result && <AnswerFeedback result={result} />}
     </div>
