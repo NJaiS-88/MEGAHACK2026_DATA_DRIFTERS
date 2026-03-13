@@ -29,13 +29,21 @@ class GeminiClient:
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or Settings()
         api_key = self.settings.gemini_api_key
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
+        if not api_key or not api_key.strip():
+            logger.warning("GEMINI_API_KEY is not set. Gemini features will not be available.")
+            self.client = None
+            self.model = None
+            return
 
         # New Gemini SDK client
-        self.client = genai.Client(api_key=api_key)
-        # Use gemini-flash-latest for better compatibility with this project
-        self.model = "gemini-flash-latest"
+        try:
+            self.client = genai.Client(api_key=api_key)
+            # Use gemini-flash-latest for better compatibility with this project
+            self.model = "gemini-flash-latest"
+        except Exception as e:
+            logger.error(f"Failed to initialize Gemini client: {e}")
+            self.client = None
+            self.model = None
 
     def extract_topics(self, prompt: str, *, max_retries: int = 1) -> GeminiResponse:
         """
@@ -45,6 +53,11 @@ class GeminiClient:
         """
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Prompt must be a non-empty string.")
+
+        if not self.client or not self.model:
+            raise RuntimeError(
+                "Gemini API is not available. Please set GEMINI_API_KEY environment variable."
+            )
 
         last_exc: Optional[Exception] = None
         for attempt in range(max_retries + 1):

@@ -77,6 +77,13 @@ async def topic_hierarchy(text: str = Body(..., embed=True)):
     try:
         hierarchy = generate_topic_hierarchy(text)
         return {"hierarchy": hierarchy}
+    except RuntimeError as exc:
+        error_msg = str(exc)
+        if "GEMINI_API_KEY" in error_msg or "Gemini API is not available" in error_msg:
+            return {
+                "error": "Gemini API key is not configured. Please set GEMINI_API_KEY environment variable to use topic hierarchy generation."
+            }
+        return {"error": f"Backend error while generating hierarchy: {error_msg}"}
     except Exception as exc:
         return {"error": f"Backend error while generating hierarchy: {exc}"}
 
