@@ -1,4 +1,4 @@
-const ML_BASE = 'http://127.0.0.1:8005/api';
+const ML_BASE = 'http://127.0.0.1:8000/api';
 
 export const mlApi = {
     get: async (endpoint) => {
