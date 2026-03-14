@@ -103,7 +103,7 @@ function CreateBookPage() {
     formData.append('file', file);
 
     try {
-      const res = await fetch(`http://127.0.0.1:8005/api/topic-hierarchy-file`, {
+      const res = await fetch(`http://127.0.0.1:8000/api/topic-hierarchy-file`, {
         method: 'POST',
         body: formData,
       });
