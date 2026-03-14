@@ -335,6 +335,192 @@ async def generate_notes_api(request: NoteRequest):
         traceback.print_exc()
         return {"error": f"Failed to generate notes: {exc}"}
 
+class ExploreTopicRequest(BaseModel):
+    userId: str
+    topic: str
+
+
+def _get_student_context(userId: str):
+    """Shared helper: fetch student performance from MongoDB and return context dict.
+    Uses the new google-genai SDK (same as feature_3 quiz generation) to call Gemini.
+    """
+    from google import genai as new_genai
+    knowledge_doc = student_knowledge_collection.find_one({"userId": userId})
+    concept_states = knowledge_doc.get("conceptStates", {}) if knowledge_doc else {}
+    mastered    = [k for k, v in concept_states.items() if v == "green"]
+    in_progress = [k for k, v in concept_states.items() if v == "yellow"]
+    struggling  = [k for k, v in concept_states.items() if v == "red"]
+    recent_attempts = list(student_attempts_collection.find(
+        {"userId": userId, "misconception.misconception_detected": True}
+    ).sort("timestamp", -1).limit(10))
+    misconceptions = list(set([
+        a.get("misconception", {}).get("misconception", "")
+        for a in recent_attempts
+        if a.get("misconception", {}).get("misconception")
+    ]))
+
+    # Use new SDK client — identical pattern to GeminiQuizClient
+    client = new_genai.Client(api_key=settings.GEMINI_API_KEY)
+    _MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
+    def generate(prompt: str) -> str:
+        last_err = None
+        for model_id in _MODELS:
+            try:
+                resp = client.models.generate_content(model=model_id, contents=prompt)
+                text = (getattr(resp, "text", None) or "").strip()
+                if text:
+                    return text
+            except Exception as e:
+                last_err = e
+                continue
+        raise RuntimeError(f"All Gemini models failed. Last error: {last_err}")
+
+    return {
+        "concept_states": concept_states,
+        "mastered": mastered,
+        "in_progress": in_progress,
+        "struggling": struggling,
+        "misconceptions": misconceptions,
+        "generate": generate,
+        "student_summary": {
+            "mastered_count": len(mastered),
+            "in_progress_count": len(in_progress),
+            "struggling_count": len(struggling),
+            "misconceptions": misconceptions[:3]
+        }
+    }
+
+
+
+
+@app.post("/api/v1/explain-topic")
+async def explain_topic(request: ExploreTopicRequest):
+    """
+    Step 1 of the Research Feature.
+    Returns a personalised explanation of the topic written specifically
+    for the student based on their existing quiz scores and misconceptions.
+    """
+    try:
+        ctx = _get_student_context(request.userId)
+        mastered    = ctx["mastered"]
+        in_progress = ctx["in_progress"]
+        struggling  = ctx["struggling"]
+        misconceptions = ctx["misconceptions"]
+
+        if mastered or in_progress or struggling or misconceptions:
+            history_block = f"""The student's existing knowledge:
+- Already mastered: {', '.join(mastered[:8]) if mastered else 'none yet'}
+- Working on: {', '.join(in_progress[:8]) if in_progress else 'none'}
+- Struggling with: {', '.join(struggling[:5]) if struggling else 'none'}
+- Known misconceptions: {', '.join(misconceptions[:4]) if misconceptions else 'none'}
+
+Tailor the explanation to build on what they know, address gaps, and acknowledge strengths briefly."""
+        else:
+            history_block = "The student is brand new to this topic. Start from scratch, assume no prior knowledge."
+
+        prompt = f"""You are a brilliant, empathetic tutor.
+A student has asked: \"I want to learn about {request.topic}.\"
+
+{history_block}
+
+Write a clear, engaging, personalised explanation of \"{request.topic}\".
+Your response must:
+1. Open with a 1-sentence hook that contextualises the topic for this student
+2. Explain the CORE IDEA in 2-3 paragraphs (plain language, concrete analogies)
+3. Call out 1-2 specific areas the student should pay extra attention to based on their history
+4. End with a motivating sentence
+
+Keep the total length to ~250 words. Use plain paragraphs only — no headers, no bullet lists, no markdown."""
+
+        explanation = ctx["generate"](prompt)
+        return {
+            "explanation": explanation,
+            "student_summary": ctx["student_summary"]
+        }
+
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return {"error": f"Explain topic failed: {str(exc)}"}
+
+
+@app.post("/api/v1/explore-topic")
+async def explore_topic(request: ExploreTopicRequest):
+    """
+    Step 2 of the Research Feature (on-demand).
+    Generates a personalized concept hierarchy + learning path.
+    Only called when the user explicitly clicks 'Generate Learning Map'.
+    """
+    import json as _json
+    try:
+        ctx = _get_student_context(request.userId)
+        concept_states = ctx["concept_states"]
+        mastered    = ctx["mastered"]
+        in_progress = ctx["in_progress"]
+        struggling  = ctx["struggling"]
+        misconceptions = ctx["misconceptions"]
+
+        if mastered or in_progress or struggling or misconceptions:
+            student_context = f"""Student's prior knowledge:
+- Mastered: {', '.join(mastered[:10]) if mastered else 'None'}
+- In-progress: {', '.join(in_progress[:10]) if in_progress else 'None'}
+- Struggling: {', '.join(struggling[:5]) if struggling else 'None'}
+- Misconceptions: {', '.join(misconceptions[:5]) if misconceptions else 'None'}
+
+IMPORTANT: Skip concepts already mastered (green). Emphasise struggling (red) and in-progress (yellow) areas."""
+        else:
+            student_context = "Brand new student — generate a beginner-to-advanced progression."
+
+        prompt = f"""You are an expert educational curriculum designer.
+Generate a structured concept hierarchy for: \"{request.topic}\"
+
+{student_context}
+
+Return ONLY a valid JSON object (no markdown, no explanation):
+{{
+  \"{request.topic}\": {{
+    \"Subtopic A\": [\"concept1\", \"concept2\", \"concept3\"],
+    \"Subtopic B\": [\"concept4\", \"concept5\"],
+    \"Subtopic C\": [\"concept6\", \"concept7\", \"concept8\"]
+  }}
+}}
+
+Rules:
+- 3-5 subtopics, 2-4 concepts each, concise names (2-5 words)
+- Foundational to advanced ordering
+- Adapt to student's knowledge gaps"""
+
+        raw = ctx["generate"](prompt)
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+        hierarchy = _json.loads(raw)
+
+        all_concepts = []
+        for subtopic, concepts in list(hierarchy.values())[0].items():
+            all_concepts.append(subtopic)
+            all_concepts.extend(concepts)
+
+        def concept_priority(c):
+            state = concept_states.get(c.replace(".", "_"))
+            return {None: 2, "red": 0, "yellow": 1, "green": 3}.get(state, 2)
+
+        learning_path = sorted(all_concepts, key=concept_priority)
+
+        return {
+            "hierarchy": hierarchy,
+            "learning_path": learning_path,
+            "student_summary": ctx["student_summary"]
+        }
+
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return {"error": f"Explore topic failed: {str(exc)}"}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
