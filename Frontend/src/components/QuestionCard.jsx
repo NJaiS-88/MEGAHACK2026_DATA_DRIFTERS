@@ -5,8 +5,213 @@ import { api } from '../services/api';
 import toast from 'react-hot-toast';
 import { mlApi } from '../services/mlApi';
 
-const TOTAL_TIME = 180; // seconds per question
-const STRUGGLE_AT = 90; // seconds before struggle button appears
+const TOTAL_TIME = 180;
+const STRUGGLE_AT = 90;
+
+// ── Agentic Investigation Panel ──────────────────────────────────────────────
+// Appears below a completed question when a misconception is detected.
+// In timed mode: adds a 3-minute countdown. Calls /api/agent/investigate twice:
+//   1) with no student_answer → returns diagnostic_question
+//   2) with student_answer    → returns root_cause + targeted_correction
+const AGENT_TIMER = 180; // 3 minutes
+
+function AgenticInvestigation({ concept, reasoning, timerEnabled, misconceptionLabel }) {
+  const [step, setStep] = useState('loading'); // loading | question | result | timeout | error
+  const [diagnosticQuestion, setDiagnosticQuestion] = useState('');
+  const [investigationAnswer, setInvestigationAnswer] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [rootCause, setRootCause] = useState('');
+  const [correction, setCorrection] = useState('');
+  const [timeLeft, setTimeLeft] = useState(AGENT_TIMER);
+  const timerRef = useRef(null);
+
+  // ── Step 1: fetch diagnostic question on mount ────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    mlApi.post('/agent/investigate', {
+      student_explanation: reasoning || concept,
+      student_answer: '',
+      misconception_label: misconceptionLabel || '',
+      force_investigate: true,
+    }).then((data) => {
+      if (cancelled) return;
+      if (data.misconception_detected && data.diagnostic_question) {
+        setDiagnosticQuestion(data.diagnostic_question);
+        setStep('question');
+      } else {
+        setStep('error');
+      }
+    }).catch(() => { if (!cancelled) setStep('error'); });
+    return () => { cancelled = true; };
+  }, [reasoning, concept]);
+
+  // ── Timer (timed mode only, starts when question is ready) ────────────────
+  useEffect(() => {
+    if (!timerEnabled || step !== 'question') return;
+    setTimeLeft(AGENT_TIMER);
+    timerRef.current = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          setStep('timeout');
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [timerEnabled, step === 'question']); // eslint-disable-line
+
+  // ── Step 2: submit investigation answer ───────────────────────────────────
+  const handleSubmit = async () => {
+    if (!investigationAnswer.trim() && step !== 'timeout') return;
+    clearInterval(timerRef.current);
+    setSubmitting(true);
+    try {
+      const data = await mlApi.post('/agent/investigate', {
+        student_explanation: reasoning || concept,
+        student_answer: investigationAnswer || '(no answer given — timed out)',
+        misconception_label: misconceptionLabel || '',
+        force_investigate: true,
+      });
+      setRootCause(data.root_cause || '');
+      setCorrection(data.targeted_correction || '');
+      setStep('result');
+    } catch {
+      setStep('error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Auto-submit on timeout
+  useEffect(() => {
+    if (step === 'timeout') handleSubmit();
+  }, [step]); // eslint-disable-line
+
+  // ── Shared styles ──────────────────────────────────────────────────────────
+  const card = {
+    marginTop: '1.5rem',
+    padding: '1.25rem',
+    backgroundColor: '#0c0a1a',
+    borderRadius: '12px',
+    border: '1px solid #7c3aed50',
+    textAlign: 'left',
+    position: 'relative',
+  };
+  const badge = { fontSize: '0.68rem', fontWeight: '700', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.08em' };
+  const timerPct = (timeLeft / AGENT_TIMER) * 100;
+  const timerColor = timeLeft > 90 ? '#a78bfa' : timeLeft > 45 ? '#fbbf24' : '#f87171';
+
+  // ── LOADING ────────────────────────────────────────────────────────────────
+  if (step === 'loading') return (
+    <div style={card}>
+      <div style={badge}>🤖 AI Investigation</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#71717a', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+        <span style={{ display: 'inline-block', width: '13px', height: '13px', border: '2px solid #3f3f46', borderTopColor: '#a78bfa', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+        Composing diagnostic question…
+      </div>
+    </div>
+  );
+
+  if (step === 'error') return null;
+
+  // ── QUESTION CARD ──────────────────────────────────────────────────────────
+  if (step === 'question' || step === 'timeout') return (
+    <div style={card}>
+      {/* Timer bar — timed mode only */}
+      {timerEnabled && (
+        <div style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+            <span style={{ ...badge }}>🤖 AI Investigation — Follow-up</span>
+            <span style={{ fontSize: '0.78rem', fontWeight: 'bold', color: timerColor, fontVariantNumeric: 'tabular-nums' }}>
+              {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
+            </span>
+          </div>
+          <div style={{ height: '4px', borderRadius: '9999px', backgroundColor: '#27272a', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${timerPct}%`, backgroundColor: timerColor, borderRadius: '9999px', transition: 'width 1s linear, background-color 0.5s' }} />
+          </div>
+        </div>
+      )}
+
+      {!timerEnabled && <div style={{ ...badge, marginBottom: '0.75rem' }}>🤖 AI Investigation — Follow-up Question</div>}
+
+      <p style={{ fontSize: '0.78rem', color: '#71717a', margin: '0 0 0.5rem 0' }}>
+        A misconception was detected. The AI wants to investigate further:
+      </p>
+      <h3 style={{ fontSize: '1.05rem', color: '#f9fafb', margin: '0 0 1.25rem 0', lineHeight: '1.6', fontWeight: '600' }}>
+        {diagnosticQuestion}
+      </h3>
+
+      <p style={{ fontSize: '0.82rem', color: '#71717a', margin: '0 0 0.5rem 0' }}>Your reasoning:</p>
+      <textarea
+        value={investigationAnswer}
+        onChange={(e) => setInvestigationAnswer(e.target.value)}
+        disabled={step === 'timeout'}
+        placeholder="Type your answer here — what do you think and why?"
+        style={{
+          width: '100%', minHeight: '90px', padding: '0.75rem',
+          borderRadius: '8px', backgroundColor: '#18181b',
+          border: '1px solid #3f3f46', color: '#f9fafb',
+          fontSize: '0.9rem', outline: 'none', resize: 'vertical',
+          boxSizing: 'border-box', marginBottom: '1rem',
+        }}
+      />
+
+      <button
+        onClick={handleSubmit}
+        disabled={submitting || (!investigationAnswer.trim() && step !== 'timeout')}
+        style={{
+          width: '100%', padding: '0.7rem',
+          borderRadius: '9999px', border: 'none',
+          background: submitting ? '#27272a' : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+          color: submitting ? '#71717a' : '#fff',
+          fontWeight: '700', fontSize: '0.9rem',
+          cursor: submitting ? 'default' : 'pointer',
+          transition: 'opacity 0.2s',
+        }}
+      >
+        {submitting ? (
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+            <span style={{ display: 'inline-block', width: '13px', height: '13px', border: '2px solid #52525b', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+            Analysing root cause…
+          </span>
+        ) : 'Submit for Root Cause Diagnosis'}
+      </button>
+    </div>
+  );
+
+  // ── RESULT CARD ────────────────────────────────────────────────────────────
+  if (step === 'result') return (
+    <div style={{ ...card, border: '1px solid #7c3aed60' }}>
+      <div style={{ ...badge, marginBottom: '1rem' }}>🤖 Root Cause Diagnosis</div>
+
+      {/* Student's response echo */}
+      {investigationAnswer && (
+        <div style={{ marginBottom: '1rem', padding: '0.65rem 0.9rem', backgroundColor: '#18181b', borderRadius: '8px', border: '1px solid #27272a' }}>
+          <div style={{ fontSize: '0.65rem', color: '#52525b', fontWeight: '600', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Your answer</div>
+          <p style={{ margin: 0, fontSize: '0.88rem', color: '#a1a1aa', fontStyle: 'italic' }}>"{investigationAnswer}"</p>
+        </div>
+      )}
+
+      {/* Root cause */}
+      <div style={{ marginBottom: '1rem', padding: '0.85rem 1rem', backgroundColor: '#18181b', borderRadius: '10px', border: '1px solid #7c3aed30' }}>
+        <div style={{ fontSize: '0.68rem', color: '#a78bfa', fontWeight: '700', textTransform: 'uppercase', marginBottom: '0.4rem' }}>Root Cause</div>
+        <p style={{ margin: 0, fontSize: '0.92rem', color: '#d4d4d8', lineHeight: '1.7' }}>{rootCause}</p>
+      </div>
+
+      {/* Targeted correction */}
+      {correction && (
+        <div style={{ padding: '0.85rem 1rem', backgroundColor: '#18181b', borderRadius: '10px', border: '1px solid #16a34a30' }}>
+          <div style={{ fontSize: '0.68rem', color: '#4ade80', fontWeight: '700', textTransform: 'uppercase', marginBottom: '0.4rem' }}>Targeted Correction</div>
+          <p style={{ margin: 0, fontSize: '0.92rem', color: '#d4d4d8', lineHeight: '1.7' }}>{correction}</p>
+        </div>
+      )}
+    </div>
+  );
+
+  return null;
+}
 
 /**
  * QuestionCard
@@ -19,6 +224,8 @@ function QuestionCard({ concept, questionData, index, onSuccess, timerEnabled, i
   const [reasoning, setReasoning] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [showAgentInvestigation, setShowAgentInvestigation] = useState(false);
+  const [agentMisconceptionLabel, setAgentMisconceptionLabel] = useState('');
 
   // Timer state — only meaningful when timerEnabled && !isLocked
   const [timeLeft, setTimeLeft] = useState(TOTAL_TIME);
@@ -124,12 +331,17 @@ function QuestionCard({ concept, questionData, index, onSuccess, timerEnabled, i
       setResult(evaluation);
       setShowIntervention(false);
 
-      if (evaluation.misconception && evaluation.misconception.misconception_detected) {
-        window.dispatchEvent(
-          new CustomEvent('tutor-activate', {
-            detail: { concept, explanation: reasoning },
-          })
-        );
+      // 🤖 Activate agentic investigation for any wrong or partial answer
+      if (evaluation.result === 'incorrect' || evaluation.result === 'partial') {
+        const label = evaluation.misconception?.misconception_detected
+          ? (evaluation.misconception?.misconception || 'Misconception detected')
+          : 'Incorrect reasoning detected';
+        setAgentMisconceptionLabel(label);
+        setShowAgentInvestigation(true);
+        // Also fire the tutor sidebar event if Feature7 confirms misconception
+        if (evaluation.misconception?.misconception_detected) {
+          window.dispatchEvent(new CustomEvent('tutor-activate', { detail: { concept, explanation: reasoning } }));
+        }
       }
 
       if (onSuccess) onSuccess();
@@ -398,6 +610,16 @@ function QuestionCard({ concept, questionData, index, onSuccess, timerEnabled, i
       )}
 
       {result && <AnswerFeedback result={result} />}
+
+      {/* 🤖 Agentic Investigation — shown when misconception detected */}
+      {showAgentInvestigation && result && (
+        <AgenticInvestigation
+          concept={concept}
+          reasoning={reasoning}
+          timerEnabled={timerEnabled}
+          misconceptionLabel={agentMisconceptionLabel}
+        />
+      )}
 
       <style
         dangerouslySetInnerHTML={{

@@ -27,6 +27,14 @@ from ML.feature3_student_knowledge_tracking.config import settings
 from ML.FeatureNotes.src.note_service import note_service
 from typing import Dict, Any
 
+# Agentic Misconception Investigation (LangGraph)
+try:
+    from ML.agent1.api.agent_routes import router as agent_router
+    _agent_enabled = True
+except ImportError as _e:
+    print(f"[Server] WARNING: Agent feature disabled — missing dependency: {_e}")
+    _agent_enabled = False
+
 # Diagnostic: Verify database configuration on server load
 print(f"\n[Server] Starting ML Service with MONGODB_URI: " + 
       (f"{settings.MONGODB_URI.split('@')[0].split(':')[0]}@..." if '@' in settings.MONGODB_URI else settings.MONGODB_URI))
@@ -53,6 +61,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount agentic investigation router (enabled only if langgraph is installed)
+if _agent_enabled:
+    app.include_router(agent_router)
 
 class UnifiedSubmitRequest(BaseModel):
     userId: str
